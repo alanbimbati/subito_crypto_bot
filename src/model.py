@@ -1,8 +1,10 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy                 import create_engine, Column
-from sqlalchemy.orm     import sessionmaker
-from sqlalchemy                 import (Integer, String, Date, DateTime, Float, Boolean, Text)
+from sqlalchemy import create_engine, Column, Table
+from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy import (Integer, String, ForeignKey,Text)
 import random
+import math
+
 def create_table(engine):
     Base.metadata.create_all(engine)
 
@@ -12,8 +14,37 @@ engine = create_engine(f'sqlite:///{db_name}')
 create_table(engine)
 session = sessionmaker(bind=engine)()
 
-livelli = [0, 100, 235, 505, 810, 1250, 1725, 2335, 2980, 3760, 4575, 5525, 6510, 7630, 8785, 10075, 11400, 12860, 14355, 15985, 17650, 19450, 21285, 23255, 25260, 27400, 29575,
-31885, 34230, 36710, 39225, 41875, 44560, 47380, 50235, 53225, 56250, 59410, 62605, 65935,70000,75000,80000,85000,90000,95000,100000,105000]
+def genera_livelli(num_livelli):
+    livelli = []
+    base = 100  # Esperienza per il primo livello
+    incremento = 100  # Incremento iniziale
+
+    for i in range(num_livelli):
+        if i == 0:
+            livelli.append(0)  # Livello 0
+        else:
+            # Calcola l'esperienza necessaria per il livello i
+            exp = int(base + incremento * (i ** 1.5))  # Utilizza una funzione polinomiale
+            livelli.append(exp)
+
+            # Aumenta l'incremento in modo controllato
+            if i < 10:
+                incremento += 1  # Aumenta più rapidamente nei primi livelli
+            else:
+                incremento += 2  # Stabilizza l'incremento dopo il decimo livello
+
+    return livelli
+
+livelli = genera_livelli(150)
+
+# for index,lv in enumerate(livelli):
+#     print(f"lv {index}: {livelli[index]}")
+
+# Tabella di associazione per la relazione molti-a-molti tra Utente e Group
+utente_group_association = Table('utente_group_association', Base.metadata,
+    Column('utente_id', Integer, ForeignKey('utente.id')),
+    Column('group_id', Integer, ForeignKey('group.id'))
+)
 
 class Database:
     def __init__(self):
@@ -32,7 +63,8 @@ class Utente(Base):
     trustscore = Column('trustscore', Integer)
     livello = Column('livello', Integer)
     admin = Column('admin',Integer)
-    
+    groups = relationship("Group", secondary=utente_group_association, back_populates="utenti")
+
     
     def CreateUser(self,id_telegram,username,name,last_name):
         session = Database().Session()
@@ -79,19 +111,40 @@ class Utente(Base):
             chatid = message.chat.id    
         return self.getUtente(chatid)
 
+    def addUserToGroup(self, user, group_id,group_name):
+        session = Database().Session()
+        try:
+            group = session.query(Group).filter_by(id_telegram=group_id).first()
+            
+            # Se il gruppo non esiste, lo creiamo
+            if not group:
+                group = Group(name=group_name,id_telegram=group_id)
+                session.add(group)
+                session.commit()
+            
+            # Ricarichiamo l'oggetto user nella sessione corrente
+            user = session.merge(user)
+            group = session.merge(group)
+            
+            if group not in user.groups:
+                user.groups.append(group)
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
+
     def checkUtente(self, message):
-        if message.chat.type == "group" or message.chat.type == "supergroup":
-            chatid =        message.from_user.id
-            username =      '@'+message.from_user.username
-            name =          message.from_user.first_name
-            last_name =     message.from_user.last_name
-        elif message.chat.type == 'private':
-            chatid = message.chat.id
-            username = '@'+str(message.chat.username)
-            name = message.chat.first_name
-            last_name = message.chat.last_name
-        user = self.CreateUser(id_telegram=chatid,username=username,name=name,last_name=last_name)
-        self.addRandomExp(user,message)
+        chatid = message.from_user.id
+        username = '@' + message.from_user.username
+        name = message.from_user.first_name
+        last_name = message.from_user.last_name
+        user = self.CreateUser(id_telegram=chatid, username=username, name=name, last_name=last_name)
+        if message.chat.type in ["group", "supergroup"]:
+            self.addUserToGroup(user,message.chat.id,message.chat.title)
+        self.addRandomExp(user, message)
 
     def isAdmin(self,utente):
         session = Database().Session()
@@ -160,3 +213,28 @@ class Feedback(Base):
         return feedback
 
 
+class Group(Base):
+    __tablename__ = "group"
+    id = Column(Integer, primary_key=True)
+    name = Column('name', String(64))
+    id_telegram = Column('id_telegram', String(64), unique=True)
+    utenti = relationship("Utente", secondary=utente_group_association, back_populates="groups")
+
+    def createGroup(self, id_telegram,name):
+        session = Database().Session()
+        group = session.query(Group).filter_by(name=name).first()
+        if group is None:
+            group = Group(
+                    id_telegram=id_telegram,
+                    name=name
+            )
+            session.add(group)
+            session.commit()
+        session.close()
+        return group
+
+    def getGroup(self, name):
+        session = Database().Session()
+        group = session.query(Group).filter_by(name=name).first()
+        session.close()
+        return group
