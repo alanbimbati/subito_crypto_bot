@@ -136,7 +136,7 @@ class Utente(Base):
             session.close()
 
 
-    def checkUtente(self, message):
+    def registerUser(self, message):
         chatid = message.from_user.id
         username = '@' + message.from_user.username
         name = message.from_user.first_name
@@ -144,7 +144,23 @@ class Utente(Base):
         user = self.CreateUser(id_telegram=chatid, username=username, name=name, last_name=last_name)
         if message.chat.type in ["group", "supergroup"]:
             self.addUserToGroup(user,message.chat.id,message.chat.title)
-        self.addRandomExp(user, message)
+        
+    def deleteUser(self, user_id):
+        session = Database().Session()
+        try:
+            # Cerca l'utente usando l'id Telegram
+            user = session.query(Utente).filter_by(id_telegram=user_id).first()
+            if user is None:
+                return False  # Utente non trovato
+            session.delete(user)
+            session.commit()
+            return True   # Eliminazione avvenuta con successo
+        except Exception as e:
+            session.rollback()
+            raise e
+        finally:
+            session.close()
+
 
     def isAdmin(self,utente):
         session = Database().Session()
