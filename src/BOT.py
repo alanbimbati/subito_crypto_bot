@@ -2,7 +2,7 @@ import telebot
 import re
 from model import Utente, Feedback, Group
 from config import TOKEN_DEL_BOT
-
+import os
 
 bot = telebot.TeleBot(TOKEN_DEL_BOT)
 
@@ -77,16 +77,31 @@ def set_pgp_key(message, edit_mode=False):
 def is_valid_pgp_key(pgp_key):
     return pgp_key.startswith("-----BEGINPGP")
 
+def backup_command(message):
+    """Sends the database backup to admin users."""
+    user = Utente().getUtenteByMessage(message)
+    if not user or not Utente().isAdmin(user):
+        bot.reply_to(message, "Non sei autorizzato ad eseguire questo comando.")
+        return
+
+    db_path = 'subito_crypto.db'
+    if not os.path.exists(db_path):
+        bot.reply_to(message, "Il database non esiste.")
+        return
+
+    try:
+        with open(db_path, 'rb') as f:
+            bot.send_document(message.chat.id, f, caption="Backup del database")
+    except Exception as e:
+        bot.reply_to(message, f"Errore durante l'invio del backup: {e}")
+
+
 def help_command(message):
     help_text = "Available commands:\n\n"
     for command, data in commands.items():
         help_text += f"*{command}*: {data['description']}\n"
 
     max_length = 4096  # Telegram's message character limit
-
-    # Improved debugging: Print the length and the message itself
-    print(f"Help message length: {len(help_text)}")
-    print("Help message content:\n", help_text)
 
     if len(help_text) > max_length:
         chunks = [help_text[i:i + max_length] for i in range(0, len(help_text), max_length)]
@@ -114,6 +129,8 @@ commands = {
     "/setpgpkey": {"handler": lambda m: set_pgp_key(m, edit_mode=False), "description": "Sets your PGP key."},
     "/editpgpkey": {"handler": lambda m: set_pgp_key(m, edit_mode=True), "description": "Edits your PGP key."},
     "/help": {"handler": help_command, "description": "Shows this help message."},
+    "/backup": {"handler": backup_command, "description": "Sends a database backup (admins only)."}
+
 }
 
 # --- Messages Dictionary (Combined Error and Success) ---
